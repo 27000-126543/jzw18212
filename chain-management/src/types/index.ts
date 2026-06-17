@@ -60,6 +60,22 @@ export interface TransferRequest {
   completedAt?: string;
 }
 
+export type InventoryLogType = 'sale' | 'transfer-in' | 'transfer-out' | 'hq-replenish' | 'adjust';
+
+export interface InventoryLog {
+  id: string;
+  storeId: string;
+  productId: string;
+  productName: string;
+  type: InventoryLogType;
+  quantity: number;
+  beforeStock: number;
+  afterStock: number;
+  relatedId?: string;
+  remark?: string;
+  createdAt: string;
+}
+
 export interface Notice {
   id: string;
   title: string;

@@ -23,6 +23,19 @@ const TransferManagement: React.FC = () => {
   }, [state.stores]);
 
   const handleApprove = (id: string) => {
+    const transfer = state.transfers.find(t => t.id === id);
+    if (!transfer) return;
+    if (transfer.type === 'to-store') {
+      const fromSp = state.storeProducts.find(
+        sp => sp.storeId === transfer.fromStoreId && sp.productId === transfer.productId
+      );
+      if (!fromSp || fromSp.stock < transfer.quantity) {
+        const available = fromSp?.stock || 0;
+        const storeName = storeMap[transfer.fromStoreId] || transfer.fromStoreId;
+        message.error(`${storeName} 库存不足（当前 ${available} 件，需调出 ${transfer.quantity} 件），无法批准`);
+        return;
+      }
+    }
     dispatch({ type: 'UPDATE_TRANSFER_STATUS', payload: { id, status: 'approved' } });
     message.success('调拨已批准，库存已即时更新');
   };
@@ -241,6 +254,22 @@ const TransferManagement: React.FC = () => {
               <Descriptions.Item label="状态">
                 <Tag color={statusColorMap[viewingTransfer.status]}>{statusTextMap[viewingTransfer.status]}</Tag>
               </Descriptions.Item>
+              {viewingTransfer.type === 'to-store' && (
+                <Descriptions.Item label="调出门店库存" span={2}>
+                  {(() => {
+                    const sp = state.storeProducts.find(
+                      p => p.storeId === viewingTransfer.fromStoreId && p.productId === viewingTransfer.productId
+                    );
+                    const stock = sp?.stock ?? 0;
+                    const enough = stock >= viewingTransfer.quantity;
+                    return (
+                      <span style={{ color: enough ? '#52c41a' : '#ff4d4f', fontWeight: 500 }}>
+                        {stock} 件 {enough ? '✓ 库存充足' : '✗ 库存不足'}
+                      </span>
+                    );
+                  })()}
+                </Descriptions.Item>
+              )}
             </Descriptions>
 
             <div style={{ padding: '16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>

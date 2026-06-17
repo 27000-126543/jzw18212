@@ -1,15 +1,21 @@
 import React, { useState, useMemo } from 'react';
-import { Card, Table, Button, Space, Tag, Input, Select, Progress, message, Modal, Form, InputNumber } from 'antd';
+import { Card, Table, Button, Space, Tag, Input, Select, Progress, message, Modal, Form, InputNumber, Tabs } from 'antd';
 import { SearchOutlined, WarningOutlined, PlusOutlined } from '@ant-design/icons';
 import { useApp } from '../../store/AppContext';
 import type { TransferRequest } from '../../types';
+import StoreInventoryLogs from './StoreInventoryLogs';
 
-const StoreInventory: React.FC = () => {
+interface StoreInventoryProps {
+  onGoToTransfers?: () => void;
+}
+
+const StoreInventory: React.FC<StoreInventoryProps> = ({ onGoToTransfers }) => {
   const { state, dispatch } = useApp();
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
-  const [replenishModal, setReplenishModal] = useState<{ productId: string; name: string } | null>(null);
+  const [replenishModal, setReplenishModal] = useState<{productId: string; name: string} | null>(null);
   const [replenishForm] = Form.useForm();
+  const [activeTab, setActiveTab] = useState<string>('list');
 
   const storeProducts = useMemo(() => {
     return state.storeProducts.filter(sp => sp.storeId === state.currentStoreId);
@@ -68,12 +74,15 @@ const StoreInventory: React.FC = () => {
         quantity: values.quantity,
         status: 'pending',
         type: 'to-hq',
-        createdAt: new Date().toISOString(),
+        createdAt: new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-'),
       };
       dispatch({ type: 'ADD_TRANSFER', payload: transfer });
-      message.success('补货申请已提交，可在调拨申请页查看');
+      message.success('补货申请已提交，自动跳转到调拨申请页');
       setReplenishModal(null);
       replenishForm.resetFields();
+      if (onGoToTransfers) {
+        setTimeout(() => onGoToTransfers(), 300);
+      }
     });
   };
 
@@ -134,93 +143,130 @@ const StoreInventory: React.FC = () => {
       key: 'actions',
       render: (_: unknown, record: any) => (
         <Space>
-          {record.stock < 30 && (
-            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => handleRequestTransfer(record.productId, record.name)}>
-              申请补货
-            </Button>
-          )}
+          <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => handleRequestTransfer(record.productId, record.name)}>
+            申请补货
+          </Button>
         </Space>
       ),
     },
   ];
 
+  const tabItems = [
+    {
+      key: 'list',
+      label: '库存列表',
+      children: (
+        <div>
+          <div style={{ marginBottom: '16px' }}>
+            <Space size={[16, 16]} wrap>
+              <Card style={{ minWidth: 200 }}>
+                <div style={{ fontSize: '12px', color: '#999' }}>商品种类</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#722ed1' }}>
+                  {productsWithStock.length}
+                </div>
+              </Card>
+              <Card style={{ minWidth: 200 }}>
+                <div style={{ fontSize: '12px', color: '#999' }}>库存总量</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1890ff' }}>
+                  {totalStock} 件
+                </div>
+              </Card>
+              <Card style={{ minWidth: 200 }}>
+                <div style={{ fontSize: '12px', color: '#999' }}>库存告急</div>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', color: lowStockCount > 0 ? '#ff4d4f' : '#52c41a' }}>
+                  {lowStockCount} 种
+                </div>
+              </Card>
+            </Space>
+          </div>
+
+          <Card style={{ marginBottom: '16px' }} bodyStyle={{ padding: '16px' }}>
+            <Space wrap>
+              <Input
+                placeholder="搜索商品名称、分类"
+                prefix={<SearchOutlined />}
+                value={searchText}
+                onChange={e => setSearchText(e.target.value)}
+                style={{ width: 240 }}
+                allowClear
+              />
+              <Select
+                placeholder="库存状态"
+                value={statusFilter || undefined}
+                onChange={setStatusFilter}
+                style={{ width: 140 }}
+                allowClear
+              >
+                <Select.Option value="low">库存告急</Select.Option>
+                <Select.Option value="normal">库存偏低</Select.Option>
+                <Select.Option value="sufficient">库存充足</Select.Option>
+              </Select>
+            </Space>
+          </Card>
+
+          <Card>
+            <Table
+              dataSource={filteredProducts}
+              columns={columns}
+              rowKey="productId"
+              pagination={{ pageSize: 10 }}
+            />
+          </Card>
+        </div>
+      ),
+    },
+    {
+      key: 'logs',
+      label: '库存流水',
+      children: <StoreInventoryLogs />,
+    },
+  ];
+
   return (
     <div>
-      <div style={{ marginBottom: '16px' }}>
-        <Space size={[16, 16]} wrap>
-          <Card style={{ minWidth: 200 }}>
-            <div style={{ fontSize: '12px', color: '#999' }}>商品种类</div>
-            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#722ed1' }}>
-              {productsWithStock.length}
-            </div>
-          </Card>
-          <Card style={{ minWidth: 200 }}>
-            <div style={{ fontSize: '12px', color: '#999' }}>库存总量</div>
-            <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1890ff' }}>
-              {totalStock} 件
-            </div>
-          </Card>
-          <Card style={{ minWidth: 200 }}>
-            <div style={{ fontSize: '12px', color: '#999' }}>库存告急</div>
-            <div style={{ fontSize: '24px', fontWeight: 'bold', color: lowStockCount > 0 ? '#ff4d4f' : '#52c41a' }}>
-              {lowStockCount} 种
-            </div>
-          </Card>
-        </Space>
-      </div>
-
-      <Card style={{ marginBottom: '16px' }} bodyStyle={{ padding: '16px' }}>
-        <Space wrap>
-          <Input
-            placeholder="搜索商品名称、分类"
-            prefix={<SearchOutlined />}
-            value={searchText}
-            onChange={e => setSearchText(e.target.value)}
-            style={{ width: 240 }}
-            allowClear
-          />
-          <Select
-            placeholder="库存状态"
-            value={statusFilter || undefined}
-            onChange={setStatusFilter}
-            style={{ width: 140 }}
-            allowClear
-          >
-            <Select.Option value="low">库存告急</Select.Option>
-            <Select.Option value="normal">库存偏低</Select.Option>
-            <Select.Option value="sufficient">库存充足</Select.Option>
-          </Select>
-        </Space>
-      </Card>
-
-      <Card>
-        <Table
-          dataSource={filteredProducts}
-          columns={columns}
-          rowKey="productId"
-          pagination={{ pageSize: 10 }}
+      <Card bodyStyle={{ padding: 0 }}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={tabItems}
+          tabBarStyle={{ padding: '0 24px', margin: 0 }}
         />
       </Card>
 
       <Modal
         title="申请补货"
         open={!!replenishModal}
-        onCancel={() => {
-          setReplenishModal(null);
-          replenishForm.resetFields();
-        }}
         onOk={handleReplenishSubmit}
+        onCancel={() => setReplenishModal(null)}
+        width={420}
         okText="提交申请"
         cancelText="取消"
       >
-        <Form form={replenishForm} layout="vertical">
-          <Form.Item label="商品名称">
-            <Input value={replenishModal?.name || ''} readOnly />
-          </Form.Item>
-          <Form.Item label="申请数量" name="quantity" rules={[{ required: true, message: '请输入申请数量' }]}>
-            <InputNumber min={1} style={{ width: '100%' }} />
-          </Form.Item>
-        </Form>
+        {replenishModal && (
+          <Form form={replenishForm} layout="vertical">
+            <div style={{ marginBottom: 16, padding: 12, background: '#fafafa', borderRadius: 8 }}>
+              <div style={{ fontWeight: 500 }}>{replenishModal.name}</div>
+              <div style={{ fontSize: '12px', color: '#999', marginTop: 4 }}>
+                补货来源：总部仓库
+              </div>
+            </div>
+            <Form.Item
+              name="quantity"
+              label="补货数量（件）"
+              rules={[{ required: true, message: '请输入补货数量' }]}
+            >
+              <InputNumber
+                style={{ width: '100%' }}
+                min={1}
+                max={999}
+                placeholder="请输入补货数量"
+              />
+            </Form.Item>
+            <div style={{ fontSize: '12px', color: '#999' }}>
+              提交后将进入调拨申请列表，等待总部审批后自动入库
+            </div>
+          </Form>
+        )}
       </Modal>
     </div>
   );

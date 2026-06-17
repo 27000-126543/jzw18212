@@ -69,7 +69,7 @@ const StoreDashboard: React.FC = () => {
       case 'orders':
         return <StoreOrders />;
       case 'inventory':
-        return <StoreInventory />;
+        return <StoreInventory onGoToTransfers={() => setActiveTab('transfers')} />;
       case 'sales':
         return <StoreSales />;
       case 'pricing':

@@ -1,7 +1,7 @@
-import React, { createContext, useContext, useReducer } from 'react';
+import React, { createContext, useContext, useReducer, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import type { Store, Product, StoreProduct, Order, TransferRequest, Notice, SalesData, User, PageType } from '../types';
-import { mockStores, mockProducts, mockOrders, mockTransfers, mockNotifications, mockSalesData, generateStoreProducts } from '../data/mockData';
+import type { Store, Product, StoreProduct, Order, TransferRequest, Notice, SalesData, User, PageType, InventoryLog } from '../types';
+import { mockStores, mockProducts, mockOrders, mockTransfers, mockNotifications, mockSalesData, generateStoreProducts, generateInventoryLogs } from '../data/mockData';
 
 interface AppState {
   currentPage: PageType | null;
@@ -14,6 +14,7 @@ interface AppState {
   transfers: TransferRequest[];
   notifications: Notice[];
   salesData: SalesData[];
+  inventoryLogs: InventoryLog[];
 }
 
 type Action =
@@ -32,9 +33,24 @@ type Action =
   | { type: 'ADD_TRANSFER'; payload: TransferRequest }
   | { type: 'UPDATE_TRANSFER_STATUS'; payload: { id: string; status: TransferRequest['status'] } }
   | { type: 'ADD_NOTIFICATION'; payload: Notice }
-  | { type: 'MARK_NOTIFICATION_READ'; payload: { notificationId: string; storeId: string } };
+  | { type: 'MARK_NOTIFICATION_READ'; payload: { notificationId: string; storeId: string } }
+  | { type: 'ADD_INVENTORY_LOG'; payload: InventoryLog };
 
 const initialStoreProducts = generateStoreProducts(mockStores, mockProducts);
+
+const initialTransfers = (): TransferRequest[] => {
+  const now = new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-');
+  return mockTransfers.map(t => {
+    if (t.status === 'approved') {
+      return { ...t, status: 'completed' as const, approvedAt: t.approvedAt || now, completedAt: now };
+    }
+    return t;
+  });
+};
+
+const initialInventoryLogs = (): InventoryLog[] => {
+  return generateInventoryLogs(mockStores, mockProducts, initialStoreProducts);
+};
 
 const initialState: AppState = {
   currentPage: null,
@@ -44,9 +60,10 @@ const initialState: AppState = {
   products: mockProducts,
   storeProducts: initialStoreProducts,
   orders: mockOrders,
-  transfers: mockTransfers,
+  transfers: initialTransfers(),
   notifications: mockNotifications,
   salesData: mockSalesData,
+  inventoryLogs: initialInventoryLogs(),
 };
 
 function appReducer(state: AppState, action: Action): AppState {
@@ -60,37 +77,69 @@ function appReducer(state: AppState, action: Action): AppState {
     case 'ADD_STORE': {
       const newStore = action.payload;
       let storeProducts = [...state.storeProducts];
+      let inventoryLogs = [...state.inventoryLogs];
       if (newStore.status === 'approved') {
-        const newProducts = state.products.map(p => ({
-          storeId: newStore.id,
-          productId: p.id,
-          stock: 50,
-          discountPrice: null,
-          discountEnabled: false,
-        }));
+        const newProducts = state.products.map((p, idx) => {
+          const sp = {
+            storeId: newStore.id,
+            productId: p.id,
+            stock: 50,
+            discountPrice: null,
+            discountEnabled: false,
+          };
+          inventoryLogs.unshift({
+            id: `log-${Date.now()}-${idx}`,
+            storeId: newStore.id,
+            productId: p.id,
+            productName: p.name,
+            type: 'hq-replenish',
+            quantity: 50,
+            beforeStock: 0,
+            afterStock: 50,
+            remark: '新门店初始铺货',
+            createdAt: new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-'),
+          });
+          return sp;
+        });
         storeProducts = [...storeProducts, ...newProducts];
       }
-      return { ...state, stores: [...state.stores, newStore], storeProducts };
+      return { ...state, stores: [...state.stores, newStore], storeProducts, inventoryLogs };
     }
     case 'UPDATE_STORE_STATUS': {
       const stores = state.stores.map(s =>
         s.id === action.payload.id ? { ...s, status: action.payload.status } : s
       );
       let storeProducts = [...state.storeProducts];
+      let inventoryLogs = [...state.inventoryLogs];
       if (action.payload.status === 'approved') {
         const store = state.stores.find(s => s.id === action.payload.id);
         if (store) {
-          const newProducts = state.products.map(p => ({
-            storeId: store.id,
-            productId: p.id,
-            stock: 50,
-            discountPrice: null,
-            discountEnabled: false,
-          }));
+          const newProducts = state.products.map((p, idx) => {
+            const sp = {
+              storeId: store.id,
+              productId: p.id,
+              stock: 50,
+              discountPrice: null,
+              discountEnabled: false,
+            };
+            inventoryLogs.unshift({
+              id: `log-${Date.now()}-${idx}`,
+              storeId: store.id,
+              productId: p.id,
+              productName: p.name,
+              type: 'hq-replenish',
+              quantity: 50,
+              beforeStock: 0,
+              afterStock: 50,
+              remark: '加盟审核通过，初始铺货',
+              createdAt: new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-'),
+            });
+            return sp;
+          });
           storeProducts = [...storeProducts, ...newProducts];
         }
       }
-      return { ...state, stores, storeProducts };
+      return { ...state, stores, storeProducts, inventoryLogs };
     }
     case 'UPDATE_STORE':
       return {
@@ -105,6 +154,7 @@ function appReducer(state: AppState, action: Action): AppState {
         orders: state.orders.filter(o => o.storeId !== action.payload),
         transfers: state.transfers.filter(t => t.fromStoreId !== action.payload && t.toStoreId !== action.payload),
         salesData: state.salesData.filter(d => d.storeId !== action.payload),
+        inventoryLogs: state.inventoryLogs.filter(l => l.storeId !== action.payload),
         notifications: state.notifications.map(n => ({
           ...n,
           targetStoreIds: n.targetStoreIds.filter(id => id !== action.payload),
@@ -163,6 +213,7 @@ function appReducer(state: AppState, action: Action): AppState {
       return { ...state, transfers: [action.payload, ...state.transfers] };
     case 'UPDATE_TRANSFER_STATUS': {
       let storeProducts = [...state.storeProducts];
+      let inventoryLogs = [...state.inventoryLogs];
       const now = new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-');
       const transfer = state.transfers.find(t => t.id === action.payload.id);
       let updatedTransfer: Partial<TransferRequest> = { status: action.payload.status };
@@ -170,12 +221,31 @@ function appReducer(state: AppState, action: Action): AppState {
       if (action.payload.status === 'approved' && transfer) {
         updatedTransfer.approvedAt = now;
         if (transfer.type === 'to-hq') {
+          const sp = storeProducts.find(p => p.storeId === transfer.fromStoreId && p.productId === transfer.productId);
+          const beforeStock = sp?.stock || 0;
           storeProducts = storeProducts.map(sp =>
             sp.storeId === transfer.fromStoreId && sp.productId === transfer.productId
               ? { ...sp, stock: sp.stock + transfer.quantity }
               : sp
           );
+          inventoryLogs.unshift({
+            id: `log-${Date.now()}`,
+            storeId: transfer.fromStoreId,
+            productId: transfer.productId,
+            productName: transfer.productName,
+            type: 'hq-replenish',
+            quantity: transfer.quantity,
+            beforeStock,
+            afterStock: beforeStock + transfer.quantity,
+            relatedId: transfer.id,
+            remark: '总部补货入库',
+            createdAt: now,
+          });
         } else if (transfer.type === 'to-store') {
+          const fromSp = storeProducts.find(p => p.storeId === transfer.fromStoreId && p.productId === transfer.productId);
+          const beforeStockFrom = fromSp?.stock || 0;
+          const toSp = storeProducts.find(p => p.storeId === transfer.toStoreId && p.productId === transfer.productId);
+          const beforeStockTo = toSp?.stock || 0;
           storeProducts = storeProducts.map(sp => {
             if (sp.storeId === transfer.fromStoreId && sp.productId === transfer.productId) {
               return { ...sp, stock: Math.max(0, sp.stock - transfer.quantity) };
@@ -184,6 +254,32 @@ function appReducer(state: AppState, action: Action): AppState {
               return { ...sp, stock: sp.stock + transfer.quantity };
             }
             return sp;
+          });
+          inventoryLogs.unshift({
+            id: `log-${Date.now()}-out`,
+            storeId: transfer.fromStoreId,
+            productId: transfer.productId,
+            productName: transfer.productName,
+            type: 'transfer-out',
+            quantity: transfer.quantity,
+            beforeStock: beforeStockFrom,
+            afterStock: Math.max(0, beforeStockFrom - transfer.quantity),
+            relatedId: transfer.id,
+            remark: `调拨出库至 ${state.stores.find(s => s.id === transfer.toStoreId)?.name || ''}`,
+            createdAt: now,
+          });
+          inventoryLogs.unshift({
+            id: `log-${Date.now()}-in`,
+            storeId: transfer.toStoreId,
+            productId: transfer.productId,
+            productName: transfer.productName,
+            type: 'transfer-in',
+            quantity: transfer.quantity,
+            beforeStock: beforeStockTo,
+            afterStock: beforeStockTo + transfer.quantity,
+            relatedId: transfer.id,
+            remark: `调拨入库自 ${state.stores.find(s => s.id === transfer.fromStoreId)?.name || ''}`,
+            createdAt: now,
           });
         }
         updatedTransfer.status = 'completed';
@@ -197,6 +293,7 @@ function appReducer(state: AppState, action: Action): AppState {
           t.id === action.payload.id ? { ...t, ...updatedTransfer } : t
         ),
         storeProducts,
+        inventoryLogs,
       };
     }
     case 'ADD_NOTIFICATION':
@@ -210,6 +307,8 @@ function appReducer(state: AppState, action: Action): AppState {
             : n
         ),
       };
+    case 'ADD_INVENTORY_LOG':
+      return { ...state, inventoryLogs: [action.payload, ...state.inventoryLogs] };
     default:
       return state;
   }
@@ -224,8 +323,9 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, initialState);
+  const value = useMemo(() => ({ state, dispatch }), [state]);
   return (
-    <AppContext.Provider value={{ state, dispatch }}>
+    <AppContext.Provider value={value}>
       {children}
     </AppContext.Provider>
   );

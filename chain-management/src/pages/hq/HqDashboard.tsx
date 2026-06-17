@@ -10,6 +10,7 @@ import {
   LogoutOutlined,
   BankOutlined,
   UserOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { useApp } from '../../store/AppContext';
 import StoreManagement from './StoreManagement';
@@ -18,11 +19,12 @@ import ProductManagement from './ProductManagement';
 import DataAnalysis from './DataAnalysis';
 import TransferManagement from './TransferManagement';
 import NotificationManagement from './NotificationManagement';
+import InventoryWarning from './InventoryWarning';
 
 const { Header, Sider, Content } = Layout;
 const { Title } = Typography;
 
-type TabKey = 'stores' | 'franchise' | 'products' | 'analysis' | 'transfers' | 'notifications';
+type TabKey = 'stores' | 'franchise' | 'products' | 'analysis' | 'transfers' | 'notifications' | 'warnings';
 
 const HqDashboard: React.FC = () => {
   const { state, dispatch } = useApp();
@@ -34,6 +36,7 @@ const HqDashboard: React.FC = () => {
     { key: 'products', icon: <ShoppingOutlined />, label: '商品管理' },
     { key: 'analysis', icon: <BarChartOutlined />, label: '数据分析' },
     { key: 'transfers', icon: <SwapOutlined />, label: '调拨管理' },
+    { key: 'warnings', icon: <WarningOutlined />, label: '库存预警' },
     { key: 'notifications', icon: <BellOutlined />, label: '通知公告' },
   ];
 
@@ -64,6 +67,8 @@ const HqDashboard: React.FC = () => {
         return <DataAnalysis />;
       case 'transfers':
         return <TransferManagement />;
+      case 'warnings':
+        return <InventoryWarning />;
       case 'notifications':
         return <NotificationManagement />;
       default:

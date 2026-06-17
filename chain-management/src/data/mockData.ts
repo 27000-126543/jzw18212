@@ -1,4 +1,4 @@
-import type { Store, Product, StoreProduct, Order, TransferRequest, Notice, SalesData } from '../types';
+import type { Store, Product, StoreProduct, Order, TransferRequest, Notice, SalesData, InventoryLog } from '../types';
 import dayjs from 'dayjs';
 
 export const mockStores: Store[] = [
@@ -322,3 +322,93 @@ export const generateSalesData = (): SalesData[] => {
 };
 
 export const mockSalesData = generateSalesData();
+
+export const generateInventoryLogs = (stores: Store[], products: Product[], storeProducts: StoreProduct[]): InventoryLog[] => {
+  const logs: InventoryLog[] = [];
+  const approvedStores = stores.filter(s => s.status === 'approved');
+  let logId = 1;
+
+  approvedStores.forEach(store => {
+    products.forEach(product => {
+      const sp = storeProducts.find(p => p.storeId === store.id && p.productId === product.id);
+      if (!sp) return;
+      
+      let currentStock = 100;
+      logs.push({
+        id: `log-${String(logId++).padStart(5, '0')}`,
+        storeId: store.id,
+        productId: product.id,
+        productName: product.name,
+        type: 'hq-replenish',
+        quantity: 100,
+        beforeStock: 0,
+        afterStock: 100,
+        remark: '总部初始铺货',
+        createdAt: dayjs().subtract(60, 'day').format('YYYY-MM-DD 08:00:00'),
+      });
+
+      const numChanges = 8 + Math.floor(Math.random() * 8);
+      for (let i = 0; i < numChanges; i++) {
+        const daysAgo = numChanges - i - 1;
+        const isSale = Math.random() > 0.25;
+        const qty = isSale
+          ? Math.floor(Math.random() * 15) + 3
+          : Math.floor(Math.random() * 30) + 10;
+        
+        if (isSale) {
+          const sold = Math.min(qty, currentStock);
+          if (sold > 0) {
+            const before = currentStock;
+            currentStock -= sold;
+            logs.push({
+              id: `log-${String(logId++).padStart(5, '0')}`,
+              storeId: store.id,
+              productId: product.id,
+              productName: product.name,
+              type: 'sale',
+              quantity: sold,
+              beforeStock: before,
+              afterStock: currentStock,
+              remark: `销售出库 ${sold} 件`,
+              createdAt: dayjs().subtract(daysAgo, 'day').format('YYYY-MM-DD HH:mm:ss'),
+            });
+          }
+        } else {
+          const before = currentStock;
+          currentStock += qty;
+          logs.push({
+            id: `log-${String(logId++).padStart(5, '0')}`,
+            storeId: store.id,
+            productId: product.id,
+            productName: product.name,
+            type: 'transfer-in',
+            quantity: qty,
+            beforeStock: before,
+            afterStock: currentStock,
+            remark: '调拨入库',
+            createdAt: dayjs().subtract(daysAgo, 'day').format('YYYY-MM-DD 10:30:00'),
+          });
+        }
+      }
+
+      const diff = sp.stock - currentStock;
+      if (Math.abs(diff) > 0) {
+        logs.push({
+          id: `log-${String(logId++).padStart(5, '0')}`,
+          storeId: store.id,
+          productId: product.id,
+          productName: product.name,
+          type: 'adjust',
+          quantity: diff,
+          beforeStock: currentStock,
+          afterStock: sp.stock,
+          remark: '库存盘点调整',
+          createdAt: dayjs().subtract(1, 'day').format('YYYY-MM-DD 23:00:00'),
+        });
+        currentStock = sp.stock;
+      }
+    });
+  });
+
+  return logs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+};
