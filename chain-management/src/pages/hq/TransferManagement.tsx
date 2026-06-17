@@ -24,17 +24,12 @@ const TransferManagement: React.FC = () => {
 
   const handleApprove = (id: string) => {
     dispatch({ type: 'UPDATE_TRANSFER_STATUS', payload: { id, status: 'approved' } });
-    message.success('调拨申请已批准');
+    message.success('调拨已批准，库存已即时更新');
   };
 
   const handleReject = (id: string) => {
     dispatch({ type: 'UPDATE_TRANSFER_STATUS', payload: { id, status: 'rejected' } });
     message.info('调拨申请已拒绝');
-  };
-
-  const handleComplete = (id: string) => {
-    dispatch({ type: 'UPDATE_TRANSFER_STATUS', payload: { id, status: 'completed' } });
-    message.success('调拨已完成，库存已更新');
   };
 
   const statusColorMap: Record<string, string> = {
@@ -57,14 +52,22 @@ const TransferManagement: React.FC = () => {
   };
 
   const pendingCount = state.transfers.filter(t => t.status === 'pending').length;
-  const totalCount = state.transfers.length;
+  const completedCount = state.transfers.filter(t => t.status === 'completed').length;
+
+  const getStockChangeDesc = (record: TransferRequest) => {
+    if (record.status !== 'completed') return null;
+    if (record.type === 'to-hq') {
+      return `${storeMap[record.fromStoreId] || record.fromStoreId} 入库 +${record.quantity}`;
+    }
+    return `${storeMap[record.fromStoreId] || record.fromStoreId} 出库 -${record.quantity}，${storeMap[record.toStoreId] || record.toStoreId} 入库 +${record.quantity}`;
+  };
 
   const columns = [
     {
       title: '调拨单号',
       dataIndex: 'id',
       key: 'id',
-      render: (text: string) => <span style={{ fontFamily: 'monospace' }}>{text}</span>,
+      render: (text: string) => <span style={{ fontFamily: 'monospace', fontSize: '12px' }}>{text}</span>,
     },
     {
       title: '商品',
@@ -85,19 +88,19 @@ const TransferManagement: React.FC = () => {
     },
     {
       title: '调出方',
-      dataIndex: 'fromStoreId',
-      key: 'fromStoreId',
-      render: (id: string, record: TransferRequest) => (
-        <span>{record.type === 'to-hq' ? '总部仓库' : storeMap[id] || id}</span>
-      ),
+      key: 'from',
+      render: (_: unknown, record: TransferRequest) => {
+        if (record.type === 'to-hq') return <span>总部仓库</span>;
+        return <span>{storeMap[record.fromStoreId] || record.fromStoreId}</span>;
+      },
     },
     {
       title: '调入方',
-      dataIndex: 'toStoreId',
-      key: 'toStoreId',
-      render: (id: string, record: TransferRequest) => (
-        <span>{record.type === 'to-hq' ? storeMap[record.fromStoreId] : storeMap[id] || id}</span>
-      ),
+      key: 'to',
+      render: (_: unknown, record: TransferRequest) => {
+        if (record.type === 'to-hq') return <span>{storeMap[record.fromStoreId] || record.fromStoreId}</span>;
+        return <span>{storeMap[record.toStoreId] || record.toStoreId}</span>;
+      },
     },
     {
       title: '状态',
@@ -108,9 +111,19 @@ const TransferManagement: React.FC = () => {
       ),
     },
     {
+      title: '库存变化',
+      key: 'stockChange',
+      render: (_: unknown, record: TransferRequest) => {
+        const desc = getStockChangeDesc(record);
+        if (!desc) return <span style={{ color: '#999' }}>—</span>;
+        return <span style={{ color: '#52c41a', fontSize: '12px' }}>{desc}</span>;
+      },
+    },
+    {
       title: '申请时间',
       dataIndex: 'createdAt',
       key: 'createdAt',
+      render: (text: string) => <span style={{ fontSize: '12px' }}>{text}</span>,
     },
     {
       title: '操作',
@@ -123,17 +136,12 @@ const TransferManagement: React.FC = () => {
           {record.status === 'pending' && (
             <>
               <Button type="link" icon={<CheckOutlined />} onClick={() => handleApprove(record.id)} style={{ color: '#52c41a' }}>
-                批准
+                批准入账
               </Button>
               <Button type="link" danger icon={<CloseOutlined />} onClick={() => handleReject(record.id)}>
                 拒绝
               </Button>
             </>
-          )}
-          {record.status === 'approved' && (
-            <Button type="link" onClick={() => handleComplete(record.id)}>
-              确认完成
-            </Button>
           )}
         </Space>
       ),
@@ -152,10 +160,17 @@ const TransferManagement: React.FC = () => {
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '28px' }}>✅</span>
+            <div>
+              <div style={{ fontSize: '12px', color: '#999' }}>已完成</div>
+              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#52c41a' }}>{completedCount}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '28px' }}>📋</span>
             <div>
               <div style={{ fontSize: '12px', color: '#999' }}>总调拨单</div>
-              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1890ff' }}>{totalCount}</div>
+              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1890ff' }}>{state.transfers.length}</div>
             </div>
           </div>
         </Space>
@@ -171,7 +186,6 @@ const TransferManagement: React.FC = () => {
             allowClear
           >
             <Select.Option value="pending">待审批</Select.Option>
-            <Select.Option value="approved">已批准</Select.Option>
             <Select.Option value="rejected">已拒绝</Select.Option>
             <Select.Option value="completed">已完成</Select.Option>
           </Select>
@@ -206,11 +220,7 @@ const TransferManagement: React.FC = () => {
             拒绝
           </Button>,
           <Button key="approve" type="primary" icon={<CheckOutlined />} onClick={() => { handleApprove(viewingTransfer.id); setViewingTransfer(null); }}>
-            批准
-          </Button>,
-        ] : viewingTransfer?.status === 'approved' ? [
-          <Button key="complete" type="primary" onClick={() => { handleComplete(viewingTransfer.id); setViewingTransfer(null); }}>
-            确认完成
+            批准入账
           </Button>,
         ] : [
           <Button key="close" onClick={() => setViewingTransfer(null)}>关闭</Button>,
@@ -218,29 +228,59 @@ const TransferManagement: React.FC = () => {
         width={600}
       >
         {viewingTransfer && (
-          <Descriptions column={1} bordered>
-            <Descriptions.Item label="调拨单号">{viewingTransfer.id}</Descriptions.Item>
-            <Descriptions.Item label="商品名称">{viewingTransfer.productName}</Descriptions.Item>
-            <Descriptions.Item label="调拨数量">{viewingTransfer.quantity} 件</Descriptions.Item>
-            <Descriptions.Item label="调拨类型">
-              <Tag color={viewingTransfer.type === 'to-hq' ? 'purple' : 'cyan'}>
-                {typeTextMap[viewingTransfer.type]}
-              </Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="调出方">
-              {viewingTransfer.type === 'to-hq' ? '总部仓库' : storeMap[viewingTransfer.fromStoreId]}
-            </Descriptions.Item>
-            <Descriptions.Item label="调入方">
-              {viewingTransfer.type === 'to-hq' ? storeMap[viewingTransfer.fromStoreId] : storeMap[viewingTransfer.toStoreId]}
-            </Descriptions.Item>
-            <Descriptions.Item label="申请时间">{viewingTransfer.createdAt}</Descriptions.Item>
-            {viewingTransfer.approvedAt && (
-              <Descriptions.Item label="审批时间">{viewingTransfer.approvedAt}</Descriptions.Item>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <Descriptions column={2} bordered size="small">
+              <Descriptions.Item label="调拨单号" span={2}>{viewingTransfer.id}</Descriptions.Item>
+              <Descriptions.Item label="商品名称">{viewingTransfer.productName}</Descriptions.Item>
+              <Descriptions.Item label="调拨数量">{viewingTransfer.quantity} 件</Descriptions.Item>
+              <Descriptions.Item label="调拨类型">
+                <Tag color={viewingTransfer.type === 'to-hq' ? 'purple' : 'cyan'}>
+                  {typeTextMap[viewingTransfer.type]}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="状态">
+                <Tag color={statusColorMap[viewingTransfer.status]}>{statusTextMap[viewingTransfer.status]}</Tag>
+              </Descriptions.Item>
+            </Descriptions>
+
+            <div style={{ padding: '16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+              <div style={{ fontSize: '13px', color: '#999', marginBottom: '12px' }}>调拨流向</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ textAlign: 'center', flex: 1 }}>
+                  <div style={{ fontSize: '24px', marginBottom: '4px' }}>📤</div>
+                  <div style={{ fontSize: '13px' }}>
+                    {viewingTransfer.type === 'to-hq' ? '总部仓库' : storeMap[viewingTransfer.fromStoreId] || viewingTransfer.fromStoreId}
+                  </div>
+                </div>
+                <div style={{ fontSize: '24px', color: '#1890ff', padding: '0 16px' }}>→</div>
+                <div style={{ textAlign: 'center', flex: 1 }}>
+                  <div style={{ fontSize: '24px', marginBottom: '4px' }}>📥</div>
+                  <div style={{ fontSize: '13px' }}>
+                    {viewingTransfer.type === 'to-hq' ? storeMap[viewingTransfer.fromStoreId] : storeMap[viewingTransfer.toStoreId] || viewingTransfer.toStoreId}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {viewingTransfer.status === 'completed' && (
+              <div style={{ padding: '12px 16px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 8 }}>
+                <div style={{ fontWeight: 500, color: '#52c41a', marginBottom: 4 }}>✅ 库存已入账</div>
+                <div style={{ fontSize: '13px', color: '#666' }}>{getStockChangeDesc(viewingTransfer)}</div>
+                {viewingTransfer.completedAt && (
+                  <div style={{ fontSize: '12px', color: '#999', marginTop: 4 }}>完成时间：{viewingTransfer.completedAt}</div>
+                )}
+              </div>
             )}
-            <Descriptions.Item label="状态">
-              <Tag color={statusColorMap[viewingTransfer.status]}>{statusTextMap[viewingTransfer.status]}</Tag>
-            </Descriptions.Item>
-          </Descriptions>
+
+            {viewingTransfer.status === 'rejected' && (
+              <div style={{ padding: '12px 16px', background: '#fff2f0', border: '1px solid #ffccc7', borderRadius: 8 }}>
+                <div style={{ fontWeight: 500, color: '#ff4d4f' }}>❌ 已拒绝，库存未变动</div>
+                {viewingTransfer.approvedAt && (
+                  <div style={{ fontSize: '12px', color: '#999', marginTop: 4 }}>拒绝时间：{viewingTransfer.approvedAt}</div>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </Modal>
     </div>

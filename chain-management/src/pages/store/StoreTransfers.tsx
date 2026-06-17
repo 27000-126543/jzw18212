@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Card, Table, Button, Space, Tag, Modal, Form, Select, InputNumber, message } from 'antd';
+import { Card, Table, Button, Space, Tag, Modal, Form, Select, InputNumber, message, Descriptions } from 'antd';
 import { PlusOutlined, EyeOutlined } from '@ant-design/icons';
 import { useApp } from '../../store/AppContext';
 import type { TransferRequest } from '../../types';
@@ -44,8 +44,8 @@ const StoreTransfers: React.FC = () => {
       const product = state.products.find(p => p.id === values.productId);
       const newTransfer: TransferRequest = {
         id: `transfer-${Date.now()}`,
-        fromStoreId: values.type === 'to-hq' ? 'hq' : values.toStoreId,
-        toStoreId: values.type === 'to-hq' ? state.currentStoreId! : state.currentStoreId!,
+        fromStoreId: '',
+        toStoreId: '',
         productId: values.productId,
         productName: product?.name || '',
         quantity: values.quantity,
@@ -53,19 +53,36 @@ const StoreTransfers: React.FC = () => {
         type: values.type === 'to-hq' ? 'to-hq' : 'to-store',
         createdAt: new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-'),
       };
-      
-      if (values.type === 'to-store') {
-        newTransfer.fromStoreId = values.toStoreId;
-        newTransfer.toStoreId = state.currentStoreId!;
-      } else {
+
+      if (values.type === 'to-hq') {
         newTransfer.fromStoreId = state.currentStoreId!;
         newTransfer.toStoreId = 'hq';
+      } else {
+        newTransfer.fromStoreId = values.toStoreId;
+        newTransfer.toStoreId = state.currentStoreId!;
       }
-      
+
       dispatch({ type: 'ADD_TRANSFER', payload: newTransfer });
       message.success('调拨申请已提交，等待总部审批');
       setIsModalOpen(false);
     });
+  };
+
+  const getStockImpact = (record: TransferRequest) => {
+    if (record.status === 'rejected') return null;
+    if (record.type === 'to-hq') {
+      if (record.fromStoreId === state.currentStoreId) {
+        return { direction: 'inbound' as const, quantity: record.quantity };
+      }
+    } else if (record.type === 'to-store') {
+      if (record.toStoreId === state.currentStoreId) {
+        return { direction: 'inbound' as const, quantity: record.quantity };
+      }
+      if (record.fromStoreId === state.currentStoreId) {
+        return { direction: 'outbound' as const, quantity: record.quantity };
+      }
+    }
+    return null;
   };
 
   const statusColorMap: Record<string, string> = {
@@ -88,13 +105,14 @@ const StoreTransfers: React.FC = () => {
   };
 
   const pendingCount = storeTransfers.filter(t => t.status === 'pending').length;
+  const completedCount = storeTransfers.filter(t => t.status === 'completed').length;
 
   const columns = [
     {
       title: '调拨单号',
       dataIndex: 'id',
       key: 'id',
-      render: (text: string) => <span style={{ fontFamily: 'monospace' }}>{text}</span>,
+      render: (text: string) => <span style={{ fontFamily: 'monospace', fontSize: '12px' }}>{text}</span>,
     },
     {
       title: '商品',
@@ -114,15 +132,39 @@ const StoreTransfers: React.FC = () => {
       render: (type: string) => <Tag color={type === 'to-hq' ? 'purple' : 'cyan'}>{typeTextMap[type]}</Tag>,
     },
     {
-      title: '方向',
-      key: 'direction',
+      title: '审批结果',
+      key: 'approvalResult',
       render: (_: unknown, record: TransferRequest) => {
-        const isOutgoing = record.fromStoreId === state.currentStoreId;
-        return (
-          <Tag color={isOutgoing ? 'orange' : 'green'}>
-            {isOutgoing ? '调出' : '调入'}
-          </Tag>
-        );
+        if (record.status === 'pending') return <Tag color="orange">待审批</Tag>;
+        if (record.status === 'completed') return <Tag color="green">已批准入账</Tag>;
+        if (record.status === 'rejected') return <Tag color="red">已拒绝</Tag>;
+        return <Tag>{statusTextMap[record.status]}</Tag>;
+      },
+    },
+    {
+      title: '库存影响',
+      key: 'stockImpact',
+      render: (_: unknown, record: TransferRequest) => {
+        const impact = getStockImpact(record);
+        if (!impact) {
+          if (record.status === 'pending') return <span style={{ color: '#999' }}>待审批</span>;
+          return <span style={{ color: '#999' }}>—</span>;
+        }
+        if (record.status === 'pending') {
+          return (
+            <span style={{ color: '#999' }}>
+              {impact.direction === 'inbound' ? '+' : '-'}{impact.quantity} 件（待生效）
+            </span>
+          );
+        }
+        if (record.status === 'completed') {
+          return (
+            <Tag color={impact.direction === 'inbound' ? 'green' : 'orange'}>
+              {impact.direction === 'inbound' ? '入库' : '出库'} {impact.direction === 'inbound' ? '+' : '-'}{impact.quantity} 件
+            </Tag>
+          );
+        }
+        return <span style={{ color: '#999' }}>未生效</span>;
       },
     },
     {
@@ -134,27 +176,18 @@ const StoreTransfers: React.FC = () => {
       },
     },
     {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      render: (status: string) => (
-        <Tag color={statusColorMap[status]}>{statusTextMap[status]}</Tag>
-      ),
-    },
-    {
       title: '申请时间',
       dataIndex: 'createdAt',
       key: 'createdAt',
+      render: (text: string) => <span style={{ fontSize: '12px' }}>{text}</span>,
     },
     {
       title: '操作',
       key: 'actions',
       render: (_: unknown, record: TransferRequest) => (
-        <Space>
-          <Button type="link" icon={<EyeOutlined />} onClick={() => setViewingTransfer(record)}>
-            详情
-          </Button>
-        </Space>
+        <Button type="link" icon={<EyeOutlined />} onClick={() => setViewingTransfer(record)}>
+          详情
+        </Button>
       ),
     },
   ];
@@ -168,6 +201,13 @@ const StoreTransfers: React.FC = () => {
             <div>
               <div style={{ fontSize: '12px', color: '#999' }}>待审批</div>
               <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#fa8c16' }}>{pendingCount}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '28px' }}>✅</span>
+            <div>
+              <div style={{ fontSize: '12px', color: '#999' }}>已完成</div>
+              <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#52c41a' }}>{completedCount}</div>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -193,7 +233,6 @@ const StoreTransfers: React.FC = () => {
             allowClear
           >
             <Select.Option value="pending">待审批</Select.Option>
-            <Select.Option value="approved">已批准</Select.Option>
             <Select.Option value="rejected">已拒绝</Select.Option>
             <Select.Option value="completed">已完成</Select.Option>
           </Select>
@@ -283,52 +322,64 @@ const StoreTransfers: React.FC = () => {
         footer={[
           <Button key="close" onClick={() => setViewingTransfer(null)}>关闭</Button>,
         ]}
-        width={500}
+        width={560}
       >
-        {viewingTransfer && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', padding: '16px', background: '#fafafa', borderRadius: 8 }}>
-              <div>
-                <div style={{ fontSize: '12px', color: '#999', marginBottom: '4px' }}>调拨单号</div>
-                <div style={{ fontFamily: 'monospace' }}>{viewingTransfer.id}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '12px', color: '#999', marginBottom: '4px' }}>状态</div>
-                <Tag color={statusColorMap[viewingTransfer.status]}>{statusTextMap[viewingTransfer.status]}</Tag>
-              </div>
-              <div>
-                <div style={{ fontSize: '12px', color: '#999', marginBottom: '4px' }}>商品名称</div>
-                <div style={{ fontWeight: 500 }}>{viewingTransfer.productName}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '12px', color: '#999', marginBottom: '4px' }}>数量</div>
-                <div style={{ fontWeight: 500 }}>{viewingTransfer.quantity} 件</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '12px', color: '#999', marginBottom: '4px' }}>类型</div>
-                <Tag color={viewingTransfer.type === 'to-hq' ? 'purple' : 'cyan'}>{typeTextMap[viewingTransfer.type]}</Tag>
-              </div>
-              <div>
-                <div style={{ fontSize: '12px', color: '#999', marginBottom: '4px' }}>申请时间</div>
-                <div>{viewingTransfer.createdAt}</div>
-              </div>
-            </div>
-            <div style={{ padding: '16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
-              <div style={{ fontSize: '12px', color: '#999', marginBottom: '8px' }}>调拨流向</div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ textAlign: 'center', flex: 1 }}>
-                  <div style={{ fontSize: '24px', marginBottom: '4px' }}>📤</div>
-                  <div style={{ fontSize: '13px' }}>{viewingTransfer.fromStoreId === 'hq' ? '总部仓库' : storeMap[viewingTransfer.fromStoreId]}</div>
-                </div>
-                <div style={{ fontSize: '24px', color: '#1890ff', padding: '0 16px' }}>→</div>
-                <div style={{ textAlign: 'center', flex: 1 }}>
-                  <div style={{ fontSize: '24px', marginBottom: '4px' }}>📥</div>
-                  <div style={{ fontSize: '13px' }}>{viewingTransfer.toStoreId === 'hq' ? '总部仓库' : storeMap[viewingTransfer.toStoreId]}</div>
+        {viewingTransfer && (() => {
+          const impact = getStockImpact(viewingTransfer);
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <Descriptions column={2} bordered size="small">
+                <Descriptions.Item label="调拨单号" span={2}>{viewingTransfer.id}</Descriptions.Item>
+                <Descriptions.Item label="商品名称">{viewingTransfer.productName}</Descriptions.Item>
+                <Descriptions.Item label="调拨数量">{viewingTransfer.quantity} 件</Descriptions.Item>
+                <Descriptions.Item label="调拨类型">
+                  <Tag color={viewingTransfer.type === 'to-hq' ? 'purple' : 'cyan'}>{typeTextMap[viewingTransfer.type]}</Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="审批结果">
+                  <Tag color={statusColorMap[viewingTransfer.status]}>
+                    {viewingTransfer.status === 'completed' ? '已批准入账' : statusTextMap[viewingTransfer.status]}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label="申请时间">{viewingTransfer.createdAt}</Descriptions.Item>
+                <Descriptions.Item label="审批时间">{viewingTransfer.approvedAt || '—'}</Descriptions.Item>
+              </Descriptions>
+
+              <div style={{ padding: '16px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+                <div style={{ fontSize: '13px', color: '#999', marginBottom: '12px' }}>调拨流向</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ textAlign: 'center', flex: 1 }}>
+                    <div style={{ fontSize: '24px', marginBottom: '4px' }}>📤</div>
+                    <div style={{ fontSize: '13px' }}>{viewingTransfer.fromStoreId === 'hq' ? '总部仓库' : storeMap[viewingTransfer.fromStoreId]}</div>
+                  </div>
+                  <div style={{ fontSize: '24px', color: '#1890ff', padding: '0 16px' }}>→</div>
+                  <div style={{ textAlign: 'center', flex: 1 }}>
+                    <div style={{ fontSize: '24px', marginBottom: '4px' }}>📥</div>
+                    <div style={{ fontSize: '13px' }}>{viewingTransfer.toStoreId === 'hq' ? '总部仓库' : storeMap[viewingTransfer.toStoreId]}</div>
+                  </div>
                 </div>
               </div>
+
+              {impact && viewingTransfer.status === 'completed' && (
+                <div style={{
+                  padding: '12px 16px',
+                  background: impact.direction === 'inbound' ? '#f6ffed' : '#fff7e6',
+                  border: `1px solid ${impact.direction === 'inbound' ? '#b7eb8f' : '#ffd591'}`,
+                  borderRadius: 8,
+                }}>
+                  <div style={{ fontWeight: 500, color: impact.direction === 'inbound' ? '#52c41a' : '#fa8c16' }}>
+                    {impact.direction === 'inbound' ? '📥 本店入库' : '📤 本店出库'}
+                  </div>
+                  <div style={{ fontSize: '20px', fontWeight: 'bold', color: impact.direction === 'inbound' ? '#52c41a' : '#fa8c16', marginTop: 4 }}>
+                    {impact.direction === 'inbound' ? '+' : '-'}{impact.quantity} 件 {viewingTransfer.productName}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#999', marginTop: 4 }}>
+                    库存已更新 · {viewingTransfer.completedAt}
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
       </Modal>
     </div>
   );

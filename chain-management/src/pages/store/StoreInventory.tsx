@@ -1,12 +1,15 @@
 import React, { useState, useMemo } from 'react';
-import { Card, Table, Button, Space, Tag, Input, Select, Progress, message } from 'antd';
+import { Card, Table, Button, Space, Tag, Input, Select, Progress, message, Modal, Form, InputNumber } from 'antd';
 import { SearchOutlined, WarningOutlined, PlusOutlined } from '@ant-design/icons';
 import { useApp } from '../../store/AppContext';
+import type { TransferRequest } from '../../types';
 
 const StoreInventory: React.FC = () => {
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [replenishModal, setReplenishModal] = useState<{ productId: string; name: string } | null>(null);
+  const [replenishForm] = Form.useForm();
 
   const storeProducts = useMemo(() => {
     return state.storeProducts.filter(sp => sp.storeId === state.currentStoreId);
@@ -48,11 +51,30 @@ const StoreInventory: React.FC = () => {
     return { color: '#52c41a', text: '库存充足', status: 'success' };
   };
 
-  const handleRequestTransfer = (_productId: string, productName: string) => {
-    const confirm = window.confirm(`确定申请调拨 ${productName} 吗？`);
-    if (confirm) {
-      message.info('请前往调拨申请页面提交申请');
-    }
+  const handleRequestTransfer = (productId: string, name: string) => {
+    setReplenishModal({ productId, name });
+    replenishForm.setFieldsValue({ quantity: 20 });
+  };
+
+  const handleReplenishSubmit = () => {
+    replenishForm.validateFields().then(values => {
+      if (!replenishModal) return;
+      const transfer: TransferRequest = {
+        id: `transfer-${Date.now()}`,
+        fromStoreId: state.currentStoreId!,
+        toStoreId: 'hq',
+        productId: replenishModal.productId,
+        productName: replenishModal.name,
+        quantity: values.quantity,
+        status: 'pending',
+        type: 'to-hq',
+        createdAt: new Date().toISOString(),
+      };
+      dispatch({ type: 'ADD_TRANSFER', payload: transfer });
+      message.success('补货申请已提交，可在调拨申请页查看');
+      setReplenishModal(null);
+      replenishForm.resetFields();
+    });
   };
 
   const columns = [
@@ -179,6 +201,27 @@ const StoreInventory: React.FC = () => {
           pagination={{ pageSize: 10 }}
         />
       </Card>
+
+      <Modal
+        title="申请补货"
+        open={!!replenishModal}
+        onCancel={() => {
+          setReplenishModal(null);
+          replenishForm.resetFields();
+        }}
+        onOk={handleReplenishSubmit}
+        okText="提交申请"
+        cancelText="取消"
+      >
+        <Form form={replenishForm} layout="vertical">
+          <Form.Item label="商品名称">
+            <Input value={replenishModal?.name || ''} readOnly />
+          </Form.Item>
+          <Form.Item label="申请数量" name="quantity" rules={[{ required: true, message: '请输入申请数量' }]}>
+            <InputNumber min={1} style={{ width: '100%' }} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

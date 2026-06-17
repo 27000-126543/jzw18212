@@ -57,8 +57,21 @@ function appReducer(state: AppState, action: Action): AppState {
       return { ...state, currentUser: action.payload };
     case 'SET_CURRENT_STORE':
       return { ...state, currentStoreId: action.payload };
-    case 'ADD_STORE':
-      return { ...state, stores: [...state.stores, action.payload] };
+    case 'ADD_STORE': {
+      const newStore = action.payload;
+      let storeProducts = [...state.storeProducts];
+      if (newStore.status === 'approved') {
+        const newProducts = state.products.map(p => ({
+          storeId: newStore.id,
+          productId: p.id,
+          stock: 50,
+          discountPrice: null,
+          discountEnabled: false,
+        }));
+        storeProducts = [...storeProducts, ...newProducts];
+      }
+      return { ...state, stores: [...state.stores, newStore], storeProducts };
+    }
     case 'UPDATE_STORE_STATUS': {
       const stores = state.stores.map(s =>
         s.id === action.payload.id ? { ...s, status: action.payload.status } : s
@@ -150,32 +163,38 @@ function appReducer(state: AppState, action: Action): AppState {
       return { ...state, transfers: [action.payload, ...state.transfers] };
     case 'UPDATE_TRANSFER_STATUS': {
       let storeProducts = [...state.storeProducts];
-      if (action.payload.status === 'completed') {
-        const transfer = state.transfers.find(t => t.id === action.payload.id);
-        if (transfer && transfer.type === 'to-hq') {
-          // 向总部补货：门店(fromStoreId)库存增加
+      const now = new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-');
+      const transfer = state.transfers.find(t => t.id === action.payload.id);
+      let updatedTransfer: Partial<TransferRequest> = { status: action.payload.status };
+
+      if (action.payload.status === 'approved' && transfer) {
+        updatedTransfer.approvedAt = now;
+        if (transfer.type === 'to-hq') {
           storeProducts = storeProducts.map(sp =>
             sp.storeId === transfer.fromStoreId && sp.productId === transfer.productId
               ? { ...sp, stock: sp.stock + transfer.quantity }
               : sp
           );
-        } else if (transfer && transfer.type === 'to-store') {
-            // 门店间调货：fromStoreId调出（减少），toStoreId调入（增加）
-            storeProducts = storeProducts.map(sp => {
-              if (sp.storeId === transfer.fromStoreId && sp.productId === transfer.productId) {
-                return { ...sp, stock: Math.max(0, sp.stock - transfer.quantity) };
-              }
-              if (sp.storeId === transfer.toStoreId && sp.productId === transfer.productId) {
-                return { ...sp, stock: sp.stock + transfer.quantity };
-              }
-              return sp;
-            });
-          }
+        } else if (transfer.type === 'to-store') {
+          storeProducts = storeProducts.map(sp => {
+            if (sp.storeId === transfer.fromStoreId && sp.productId === transfer.productId) {
+              return { ...sp, stock: Math.max(0, sp.stock - transfer.quantity) };
+            }
+            if (sp.storeId === transfer.toStoreId && sp.productId === transfer.productId) {
+              return { ...sp, stock: sp.stock + transfer.quantity };
+            }
+            return sp;
+          });
+        }
+        updatedTransfer.status = 'completed';
+        updatedTransfer.completedAt = now;
+      } else if (action.payload.status === 'rejected') {
+        updatedTransfer.approvedAt = now;
       }
       return {
         ...state,
         transfers: state.transfers.map(t =>
-          t.id === action.payload.id ? { ...t, status: action.payload.status } : t
+          t.id === action.payload.id ? { ...t, ...updatedTransfer } : t
         ),
         storeProducts,
       };

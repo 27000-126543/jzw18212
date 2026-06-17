@@ -57,6 +57,7 @@ export interface TransferRequest {
   type: 'to-hq' | 'to-store';
   createdAt: string;
   approvedAt?: string;
+  completedAt?: string;
 }
 
 export interface Notice {

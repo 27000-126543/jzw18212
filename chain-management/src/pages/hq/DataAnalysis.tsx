@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Card, Row, Col, Select, DatePicker, Table, Space, Tag } from 'antd';
+import { Card, Row, Col, Select, DatePicker, Table, Space, Tag, Drawer, Descriptions } from 'antd';
 import {
   AreaChart,
   Area,
@@ -29,6 +29,7 @@ const DataAnalysis: React.FC = () => {
   const [dimension, setDimension] = useState<'time' | 'region' | 'store'>('time');
   const [metric, setMetric] = useState<'sales' | 'orders' | 'avgOrder'>('sales');
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+  const [drillStoreId, setDrillStoreId] = useState<string | null>(null);
 
   const approvedStores = state.stores.filter(s => s.status === 'approved');
   const storeMap = useMemo(() => {
@@ -95,6 +96,43 @@ const DataAnalysis: React.FC = () => {
     return regionStats.map(s => ({ name: s.region, value: s.salesAmount }));
   }, [storeStats, regionStats, dimension]);
 
+  const drillStoreData = useMemo(() => {
+    if (!drillStoreId) return null;
+    const store = storeMap[drillStoreId];
+    if (!store) return null;
+    const storeSales = state.salesData.filter(d => d.storeId === drillStoreId);
+    const storeFilteredSales = dateRange
+      ? storeSales.filter(d => {
+          const date = dayjs(d.date);
+          return date.isAfter(dateRange[0].subtract(1, 'day')) && date.isBefore(dateRange[1].add(1, 'day'));
+        })
+      : storeSales;
+
+    const totalSales = storeFilteredSales.reduce((sum, d) => sum + d.salesAmount, 0);
+    const totalOrders = storeFilteredSales.reduce((sum, d) => sum + d.orderCount, 0);
+    const totalCustomers = storeFilteredSales.reduce((sum, d) => sum + d.customerCount, 0);
+    const avgOrder = totalOrders > 0 ? totalSales / totalOrders : 0;
+
+    const trend = storeFilteredSales
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map(d => ({ date: d.date.slice(5), 销售额: d.salesAmount, 订单数: d.orderCount }));
+
+    const storeOrders = state.orders.filter(o => o.storeId === drillStoreId && o.status === 'completed');
+    const productMap: Record<string, { name: string; amount: number; quantity: number }> = {};
+    storeOrders.forEach(order => {
+      order.items.forEach(item => {
+        if (!productMap[item.productId]) {
+          productMap[item.productId] = { name: item.productName, amount: 0, quantity: 0 };
+        }
+        productMap[item.productId].amount += item.unitPrice * item.quantity;
+        productMap[item.productId].quantity += item.quantity;
+      });
+    });
+    const topProducts = Object.values(productMap).sort((a, b) => b.amount - a.amount).slice(0, 8);
+
+    return { store, totalSales, totalOrders, totalCustomers, avgOrder, trend, topProducts };
+  }, [drillStoreId, storeMap, state.salesData, state.orders, dateRange]);
+
   const storeComparisonColumns = [
     {
       title: '排名',
@@ -112,10 +150,12 @@ const DataAnalysis: React.FC = () => {
       title: '门店',
       dataIndex: 'storeName',
       key: 'storeName',
-      render: (text: string, record: { region: string }) => (
+      render: (text: string, record: { storeId: string; region: string }) => (
         <Space>
           <span style={{ fontSize: '18px' }}>🏪</span>
-          <span>{text}</span>
+          <a onClick={() => setDrillStoreId(record.storeId)} style={{ fontWeight: 500, color: '#1890ff', cursor: 'pointer' }}>
+            {text}
+          </a>
           <Tag color="blue">{record.region}</Tag>
         </Space>
       ),
@@ -147,6 +187,13 @@ const DataAnalysis: React.FC = () => {
         const rate = (60 + Math.random() * 25).toFixed(1);
         return <span>{rate}%</span>;
       },
+    },
+    {
+      title: '操作',
+      key: 'action',
+      render: (_: unknown, record: { storeId: string }) => (
+        <a onClick={() => setDrillStoreId(record.storeId)}>查看明细</a>
+      ),
     },
   ];
 
@@ -280,6 +327,88 @@ const DataAnalysis: React.FC = () => {
           pagination={{ pageSize: 10 }}
         />
       </Card>
+
+      <Drawer
+        title={drillStoreData ? `${drillStoreData.store.name} · 经营明细` : '门店经营明细'}
+        open={!!drillStoreId}
+        onClose={() => setDrillStoreId(null)}
+        width={680}
+      >
+        {drillStoreData && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <Descriptions column={2} bordered size="small">
+              <Descriptions.Item label="门店名称">{drillStoreData.store.name}</Descriptions.Item>
+              <Descriptions.Item label="区域"><Tag color="blue">{drillStoreData.store.region}</Tag></Descriptions.Item>
+              <Descriptions.Item label="地址" span={2}>{drillStoreData.store.address}</Descriptions.Item>
+              <Descriptions.Item label="负责人">{drillStoreData.store.manager}</Descriptions.Item>
+              <Descriptions.Item label="电话">{drillStoreData.store.phone}</Descriptions.Item>
+            </Descriptions>
+
+            <Row gutter={[12, 12]}>
+              <Col span={6}>
+                <Card size="small" bodyStyle={{ padding: '12px' }}>
+                  <div style={{ fontSize: '11px', color: '#999' }}>销售额</div>
+                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#ff4d4f' }}>¥{drillStoreData.totalSales.toLocaleString()}</div>
+                </Card>
+              </Col>
+              <Col span={6}>
+                <Card size="small" bodyStyle={{ padding: '12px' }}>
+                  <div style={{ fontSize: '11px', color: '#999' }}>订单数</div>
+                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#1890ff' }}>{drillStoreData.totalOrders}</div>
+                </Card>
+              </Col>
+              <Col span={6}>
+                <Card size="small" bodyStyle={{ padding: '12px' }}>
+                  <div style={{ fontSize: '11px', color: '#999' }}>客单价</div>
+                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#52c41a' }}>¥{drillStoreData.avgOrder.toFixed(2)}</div>
+                </Card>
+              </Col>
+              <Col span={6}>
+                <Card size="small" bodyStyle={{ padding: '12px' }}>
+                  <div style={{ fontSize: '11px', color: '#999' }}>客流</div>
+                  <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#722ed1' }}>{drillStoreData.totalCustomers}</div>
+                </Card>
+              </Col>
+            </Row>
+
+            <Card title="销售趋势" size="small">
+              <div style={{ height: 240 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={drillStoreData.trend}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip />
+                    <Area type="monotone" dataKey="销售额" stroke="#722ed1" fill="#722ed1" fillOpacity={0.3} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+
+            <Card title="热销商品" size="small">
+              <Table
+                dataSource={drillStoreData.topProducts}
+                rowKey="name"
+                size="small"
+                pagination={false}
+                columns={[
+                  {
+                    title: '排名',
+                    key: 'rank',
+                    width: 50,
+                    render: (_: unknown, __: unknown, index: number) => (
+                      <span style={{ fontWeight: 'bold', color: index < 3 ? '#faad14' : '#999' }}>{index + 1}</span>
+                    ),
+                  },
+                  { title: '商品', dataIndex: 'name', key: 'name' },
+                  { title: '销量', dataIndex: 'quantity', key: 'quantity', render: (v: number) => `${v} 件` },
+                  { title: '销售额', dataIndex: 'amount', key: 'amount', render: (v: number) => <span style={{ color: '#ff4d4f' }}>¥{v.toFixed(2)}</span> },
+                ]}
+              />
+            </Card>
+          </div>
+        )}
+      </Drawer>
     </div>
   );
 };
