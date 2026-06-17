@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Card, Table, Button, Space, Tag, Modal, Form, InputNumber, Switch, message, Input } from 'antd';
+import { Card, Table, Button, Space, Tag, Modal, Form, InputNumber, Switch, message, Input, Select } from 'antd';
 import { EditOutlined, SearchOutlined, TagOutlined } from '@ant-design/icons';
 import { useApp } from '../../store/AppContext';
 
@@ -18,19 +18,22 @@ const StorePricing: React.FC = () => {
   const productsWithInfo = useMemo(() => {
     return storeProducts.map(sp => {
       const product = state.products.find(p => p.id === sp.productId);
-      const actualPrice = sp.discountEnabled && sp.discountPrice ? sp.discountPrice : product?.basePrice || 0;
-      const discountPercent = product?.basePrice && sp.discountPrice
-        ? Math.round((1 - sp.discountPrice / product.basePrice) * 100)
+      const basePrice = product?.basePrice || 0;
+      const hasValidDiscount = sp.discountEnabled && sp.discountPrice != null && sp.discountPrice > 0 && sp.discountPrice < basePrice;
+      const actualPrice = hasValidDiscount ? sp.discountPrice! : basePrice;
+      const discountPercent = hasValidDiscount && basePrice > 0
+        ? Math.round((1 - sp.discountPrice! / basePrice) * 100)
         : 0;
       return {
         ...sp,
         product,
         name: product?.name || '',
         category: product?.category || '',
-        basePrice: product?.basePrice || 0,
+        basePrice,
         image: product?.image || '',
         actualPrice,
         discountPercent,
+        discountEnabled: hasValidDiscount,
       };
     }).filter(item => item.product);
   }, [storeProducts, state.products]);
@@ -49,7 +52,7 @@ const StorePricing: React.FC = () => {
     setEditingProduct(record);
     form.setFieldsValue({
       discountEnabled: record.discountEnabled,
-      discountPrice: record.discountPrice,
+      discountPrice: record.discountEnabled && record.discountPrice != null ? record.discountPrice : null,
     });
     setIsModalOpen(true);
   };
@@ -57,14 +60,20 @@ const StorePricing: React.FC = () => {
   const handleSubmit = () => {
     form.validateFields().then(values => {
       if (editingProduct) {
+        const basePrice = editingProduct.basePrice;
+        const discountEnabled = !!values.discountEnabled;
+        const discountPrice = discountEnabled && values.discountPrice != null
+          ? Math.min(values.discountPrice, basePrice)
+          : null;
+
         dispatch({
           type: 'UPDATE_STORE_PRODUCT',
           payload: {
             storeId: state.currentStoreId!,
             productId: editingProduct.productId,
             stock: editingProduct.stock,
-            discountPrice: values.discountEnabled ? values.discountPrice : null,
-            discountEnabled: values.discountEnabled,
+            discountPrice,
+            discountEnabled: discountEnabled && discountPrice != null && discountPrice < basePrice,
           },
         });
         message.success('价格优惠已更新');
@@ -92,14 +101,25 @@ const StorePricing: React.FC = () => {
       title: '标准售价',
       dataIndex: 'basePrice',
       key: 'basePrice',
-      render: (price: number) => <span style={{ textDecoration: 'line-through', color: '#999' }}>¥{price.toFixed(2)}</span>,
+      render: (price: number, record: any) => (
+        <span style={{
+          textDecoration: record.discountEnabled ? 'line-through' : 'none',
+          color: record.discountEnabled ? '#999' : '#333',
+        }}>
+          ¥{price.toFixed(2)}
+        </span>
+      ),
     },
     {
       title: '本店售价',
       key: 'actualPrice',
       render: (_: unknown, record: any) => (
-        <Space direction="vertical" size={0}>
-          <span style={{ color: '#ff4d4f', fontWeight: 'bold', fontSize: '16px' }}>
+        <Space direction="vertical" size={2}>
+          <span style={{
+            color: record.discountEnabled ? '#ff4d4f' : '#333',
+            fontWeight: 'bold',
+            fontSize: '16px',
+          }}>
             ¥{record.actualPrice.toFixed(2)}
           </span>
           {record.discountEnabled && record.discountPercent > 0 && (
@@ -201,7 +221,9 @@ const StorePricing: React.FC = () => {
               <span style={{ fontSize: '32px' }}>{editingProduct.image}</span>
               <div>
                 <div style={{ fontWeight: 500 }}>{editingProduct.name}</div>
-                <div style={{ color: '#999', fontSize: '13px' }}>标准售价：¥{editingProduct.basePrice.toFixed(2)}</div>
+                <div style={{ color: '#999', fontSize: '13px' }}>
+                  总部标准售价：<span style={{ fontWeight: 500, color: '#333' }}>¥{editingProduct.basePrice.toFixed(2)}</span>
+                </div>
               </div>
             </Space>
           </div>
@@ -222,24 +244,47 @@ const StorePricing: React.FC = () => {
               getFieldValue('discountEnabled') ? (
                 <Form.Item
                   name="discountPrice"
-                  label="优惠价格（元）"
+                  label={`优惠价格（元，最高 ¥${editingProduct ? (editingProduct.basePrice - 0.5).toFixed(2) : '0.00'}）`}
                   rules={[
                     { required: true, message: '请输入优惠价格' },
-                    { type: 'number', min: 0, message: '价格不能为负数' },
+                    {
+                      validator: (_, value) => {
+                        if (editingProduct && value != null && value >= editingProduct.basePrice) {
+                          return Promise.reject(new Error(`优惠价格必须低于标准售价 ¥${editingProduct.basePrice.toFixed(2)}`));
+                        }
+                        if (value != null && value <= 0) {
+                          return Promise.reject(new Error('优惠价格必须大于0'));
+                        }
+                        return Promise.resolve();
+                      },
+                    },
                   ]}
                 >
                   <InputNumber
                     style={{ width: '100%' }}
-                    min={0}
+                    min={0.5}
+                    max={editingProduct ? editingProduct.basePrice - 0.01 : undefined}
                     step={0.5}
-                    placeholder="请输入优惠价格"
+                    placeholder="请输入优惠价格（需低于标准售价）"
                   />
                 </Form.Item>
               ) : null
             }
           </Form.Item>
-          <div style={{ color: '#999', fontSize: '12px', padding: '8px', background: '#fffbe6', borderRadius: 4 }}>
-            💡 提示：优惠价格不得高于标准售价，折扣需在总部授权范围内设置
+          <div style={{
+            color: '#666',
+            fontSize: '12px',
+            padding: '10px 12px',
+            background: '#e6f7ff',
+            borderRadius: 4,
+            border: '1px solid #91d5ff',
+          }}>
+            <strong>价格规则说明：</strong>
+            <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
+              <li>优惠价格必须<strong style={{ color: '#ff4d4f' }}>低于</strong>总部标准售价</li>
+              <li>关闭优惠后，本店将自动使用总部标准价</li>
+              <li>价格最低单位为 0.5 元</li>
+            </ul>
           </div>
         </Form>
       </Modal>

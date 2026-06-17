@@ -1,8 +1,6 @@
 import type { Store, Product, StoreProduct, Order, TransferRequest, Notice, SalesData } from '../types';
 import dayjs from 'dayjs';
 
-const generateId = () => Math.random().toString(36).substring(2, 11);
-
 export const mockStores: Store[] = [
   {
     id: 'store-001',

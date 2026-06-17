@@ -3,8 +3,6 @@ import { Card, Row, Col, Space, DatePicker, Select } from 'antd';
 import {
   AreaChart,
   Area,
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -42,7 +40,6 @@ const StoreSales: React.FC = () => {
 
   const totalSales = filteredData.reduce((sum, d) => sum + d.salesAmount, 0);
   const totalOrders = filteredData.reduce((sum, d) => sum + d.orderCount, 0);
-  const totalCustomers = filteredData.reduce((sum, d) => sum + d.customerCount, 0);
   const avgOrderValue = totalOrders > 0 ? totalSales / totalOrders : 0;
   const avgDailySales = filteredData.length > 0 ? totalSales / filteredData.length : 0;
 
@@ -159,7 +156,7 @@ const StoreSales: React.FC = () => {
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value: number) => `¥${value.toFixed(2)}`} />
+                  <Tooltip formatter={(value) => `¥${(Number(value) ?? 0).toFixed(2)}`} />
                 </PieChart>
               </ResponsiveContainer>
             </div>

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Card, Table, Button, Space, Tag, Modal, message, Descriptions, Select } from 'antd';
-import { CheckOutlined, CloseOutlined, EyeOutlined, SearchOutlined } from '@ant-design/icons';
+import { CheckOutlined, CloseOutlined, EyeOutlined } from '@ant-design/icons';
 import { useApp } from '../../store/AppContext';
 import type { TransferRequest } from '../../types';
 

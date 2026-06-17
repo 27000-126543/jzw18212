@@ -35,7 +35,7 @@ const StoreManagement: React.FC = () => {
   };
 
   const handleDelete = (id: string) => {
-    dispatch({ type: 'DELETE_PRODUCT', payload: id });
+    dispatch({ type: 'DELETE_STORE', payload: id });
     message.success('门店已删除');
   };
 

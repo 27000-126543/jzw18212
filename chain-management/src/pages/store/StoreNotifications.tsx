@@ -35,7 +35,7 @@ const StoreNotifications: React.FC = () => {
     <div>
       <Card style={{ marginBottom: '16px' }} bodyStyle={{ padding: '20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <Badge count={unreadCount} size="large">
+          <Badge count={unreadCount}>
             <BellOutlined style={{ fontSize: '36px', color: '#1890ff' }} />
           </Badge>
           <div>

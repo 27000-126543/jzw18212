@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useReducer, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer } from 'react';
+import type { ReactNode } from 'react';
 import type { Store, Product, StoreProduct, Order, TransferRequest, Notice, SalesData, User, PageType } from '../types';
 import { mockStores, mockProducts, mockOrders, mockTransfers, mockNotifications, mockSalesData, generateStoreProducts } from '../data/mockData';
 
@@ -22,6 +23,7 @@ type Action =
   | { type: 'ADD_STORE'; payload: Store }
   | { type: 'UPDATE_STORE_STATUS'; payload: { id: string; status: Store['status'] } }
   | { type: 'UPDATE_STORE'; payload: Store }
+  | { type: 'DELETE_STORE'; payload: string }
   | { type: 'ADD_PRODUCT'; payload: Product }
   | { type: 'UPDATE_PRODUCT'; payload: Product }
   | { type: 'DELETE_PRODUCT'; payload: string }
@@ -82,6 +84,20 @@ function appReducer(state: AppState, action: Action): AppState {
         ...state,
         stores: state.stores.map(s => s.id === action.payload.id ? action.payload : s),
       };
+    case 'DELETE_STORE':
+      return {
+        ...state,
+        stores: state.stores.filter(s => s.id !== action.payload),
+        storeProducts: state.storeProducts.filter(sp => sp.storeId !== action.payload),
+        orders: state.orders.filter(o => o.storeId !== action.payload),
+        transfers: state.transfers.filter(t => t.fromStoreId !== action.payload && t.toStoreId !== action.payload),
+        salesData: state.salesData.filter(d => d.storeId !== action.payload),
+        notifications: state.notifications.map(n => ({
+          ...n,
+          targetStoreIds: n.targetStoreIds.filter(id => id !== action.payload),
+          readBy: n.readBy.filter(id => id !== action.payload),
+        })),
+      };
     case 'ADD_PRODUCT': {
       const newProduct = action.payload;
       const approvedStores = state.stores.filter(s => s.status === 'approved');
@@ -137,18 +153,20 @@ function appReducer(state: AppState, action: Action): AppState {
       if (action.payload.status === 'completed') {
         const transfer = state.transfers.find(t => t.id === action.payload.id);
         if (transfer && transfer.type === 'to-hq') {
+          // 向总部补货：门店(fromStoreId)库存增加
           storeProducts = storeProducts.map(sp =>
             sp.storeId === transfer.fromStoreId && sp.productId === transfer.productId
               ? { ...sp, stock: sp.stock + transfer.quantity }
               : sp
           );
         } else if (transfer && transfer.type === 'to-store') {
+            // 门店间调货：fromStoreId调出（减少），toStoreId调入（增加）
             storeProducts = storeProducts.map(sp => {
               if (sp.storeId === transfer.fromStoreId && sp.productId === transfer.productId) {
-                return { ...sp, stock: sp.stock + transfer.quantity };
+                return { ...sp, stock: Math.max(0, sp.stock - transfer.quantity) };
               }
               if (sp.storeId === transfer.toStoreId && sp.productId === transfer.productId) {
-                return { ...sp, stock: Math.max(0, sp.stock - transfer.quantity) };
+                return { ...sp, stock: sp.stock + transfer.quantity };
               }
               return sp;
             });

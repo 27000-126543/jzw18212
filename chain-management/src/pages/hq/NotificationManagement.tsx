@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Card, Table, Button, Space, Tag, Modal, Form, Input, Select, message, Descriptions, Switch } from 'antd';
+import { Card, Table, Button, Space, Tag, Modal, Form, Input, Select, message, Descriptions } from 'antd';
 import { PlusOutlined, EyeOutlined, CheckOutlined } from '@ant-design/icons';
 import { useApp } from '../../store/AppContext';
 import type { Notice } from '../../types';

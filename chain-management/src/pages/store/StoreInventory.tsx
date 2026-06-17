@@ -4,7 +4,7 @@ import { SearchOutlined, WarningOutlined, PlusOutlined } from '@ant-design/icons
 import { useApp } from '../../store/AppContext';
 
 const StoreInventory: React.FC = () => {
-  const { state, dispatch } = useApp();
+  const { state } = useApp();
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
 
@@ -48,7 +48,7 @@ const StoreInventory: React.FC = () => {
     return { color: '#52c41a', text: '库存充足', status: 'success' };
   };
 
-  const handleRequestTransfer = (productId: string, productName: string) => {
+  const handleRequestTransfer = (_productId: string, productName: string) => {
     const confirm = window.confirm(`确定申请调拨 ${productName} 吗？`);
     if (confirm) {
       message.info('请前往调拨申请页面提交申请');
