@@ -38,19 +38,96 @@ type Action =
 
 const initialStoreProducts = generateStoreProducts(mockStores, mockProducts);
 
-const initialTransfers = (): TransferRequest[] => {
+type ProcessedInitData = {
+  storeProducts: StoreProduct[];
+  transfers: TransferRequest[];
+  inventoryLogs: InventoryLog[];
+};
+
+const processInitialTransfers = (): ProcessedInitData => {
+  let storeProducts = [...initialStoreProducts.map(sp => ({ ...sp }))];
+  let inventoryLogs: InventoryLog[] = generateInventoryLogs(mockStores, mockProducts, initialStoreProducts);
   const now = new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-');
-  return mockTransfers.map(t => {
-    if (t.status === 'approved') {
-      return { ...t, status: 'completed' as const, approvedAt: t.approvedAt || now, completedAt: now };
+
+  const transfers = mockTransfers.map(t => {
+    if (t.status === 'approved' || t.status === 'completed') {
+      if (t.type === 'to-hq') {
+        storeProducts = storeProducts.map(sp => {
+          if (sp.storeId === t.fromStoreId && sp.productId === t.productId) {
+            const before = sp.stock;
+            const after = sp.stock + t.quantity;
+            inventoryLogs.unshift({
+              id: `log-init-${t.id}`,
+              storeId: t.fromStoreId,
+              productId: t.productId,
+              productName: t.productName,
+              type: 'hq-replenish',
+              quantity: t.quantity,
+              beforeStock: before,
+              afterStock: after,
+              relatedId: t.id,
+              remark: '历史调拨入库',
+              createdAt: t.createdAt,
+            });
+            return { ...sp, stock: after };
+          }
+          return sp;
+        });
+      } else if (t.type === 'to-store') {
+        storeProducts = storeProducts.map(sp => {
+          if (sp.storeId === t.fromStoreId && sp.productId === t.productId) {
+            const before = sp.stock;
+            const after = Math.max(0, sp.stock - t.quantity);
+            inventoryLogs.unshift({
+              id: `log-init-out-${t.id}`,
+              storeId: t.fromStoreId,
+              productId: t.productId,
+              productName: t.productName,
+              type: 'transfer-out',
+              quantity: t.quantity,
+              beforeStock: before,
+              afterStock: after,
+              relatedId: t.id,
+              remark: '历史调拨出库',
+              createdAt: t.createdAt,
+            });
+            return { ...sp, stock: after };
+          }
+          if (sp.storeId === t.toStoreId && sp.productId === t.productId) {
+            const before = sp.stock;
+            const after = sp.stock + t.quantity;
+            inventoryLogs.unshift({
+              id: `log-init-in-${t.id}`,
+              storeId: t.toStoreId,
+              productId: t.productId,
+              productName: t.productName,
+              type: 'transfer-in',
+              quantity: t.quantity,
+              beforeStock: before,
+              afterStock: after,
+              relatedId: t.id,
+              remark: '历史调拨入库',
+              createdAt: t.createdAt,
+            });
+            return { ...sp, stock: after };
+          }
+          return sp;
+        });
+      }
+      return {
+        ...t,
+        status: 'completed' as const,
+        approvedAt: t.approvedAt || t.createdAt || now,
+        completedAt: t.completedAt || t.createdAt || now,
+      };
     }
     return t;
   });
+
+  return { storeProducts, transfers, inventoryLogs };
 };
 
-const initialInventoryLogs = (): InventoryLog[] => {
-  return generateInventoryLogs(mockStores, mockProducts, initialStoreProducts);
-};
+const initialData = processInitialTransfers();
 
 const initialState: AppState = {
   currentPage: null,
@@ -58,12 +135,12 @@ const initialState: AppState = {
   currentStoreId: null,
   stores: mockStores,
   products: mockProducts,
-  storeProducts: initialStoreProducts,
+  storeProducts: initialData.storeProducts,
   orders: mockOrders,
-  transfers: initialTransfers(),
+  transfers: initialData.transfers,
   notifications: mockNotifications,
   salesData: mockSalesData,
-  inventoryLogs: initialInventoryLogs(),
+  inventoryLogs: initialData.inventoryLogs,
 };
 
 function appReducer(state: AppState, action: Action): AppState {

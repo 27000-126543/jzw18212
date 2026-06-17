@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Card, Table, Button, Space, Tag, Modal, Form, Select, InputNumber, message, Descriptions } from 'antd';
 import { PlusOutlined, EyeOutlined } from '@ant-design/icons';
 import { useApp } from '../../store/AppContext';
@@ -10,6 +10,29 @@ const StoreTransfers: React.FC = () => {
   const [viewingTransfer, setViewingTransfer] = useState<TransferRequest | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [form] = Form.useForm();
+
+  const type = Form.useWatch('type', form);
+  const toStoreId = Form.useWatch('toStoreId', form);
+  const productId = Form.useWatch('productId', form);
+
+  const sourceStoreStock = useMemo(() => {
+    if (type === 'to-store' && toStoreId && productId) {
+      const storeProduct = state.storeProducts.find(
+        sp => sp.storeId === toStoreId && sp.productId === productId
+      );
+      return storeProduct?.stock ?? 0;
+    }
+    return 0;
+  }, [type, toStoreId, productId, state.storeProducts]);
+
+  useEffect(() => {
+    if (type === 'to-store' && toStoreId && productId) {
+      const currentQuantity = form.getFieldValue('quantity');
+      if (currentQuantity && currentQuantity > sourceStoreStock && sourceStoreStock > 0) {
+        form.setFieldsValue({ quantity: sourceStoreStock });
+      }
+    }
+  }, [type, toStoreId, productId, sourceStoreStock, form]);
 
   const storeTransfers = useMemo(() => {
     return state.transfers.filter(t => t.fromStoreId === state.currentStoreId || t.toStoreId === state.currentStoreId);
@@ -304,11 +327,23 @@ const StoreTransfers: React.FC = () => {
           <Form.Item
             name="quantity"
             label="调拨数量"
-            rules={[{ required: true, message: '请输入调拨数量' }]}
+            rules={[
+              { required: true, message: '请输入调拨数量' },
+              {
+                validator: (_, value) => {
+                  if (type === 'to-store' && toStoreId && productId && value && value > sourceStoreStock) {
+                    return Promise.reject(new Error(`调拨数量不能超过调出门店库存（${sourceStoreStock} 件）`));
+                  }
+                  return Promise.resolve();
+                }
+              }
+            ]}
+            help={type === 'to-store' && toStoreId && productId ? `调出门店当前库存：${sourceStoreStock} 件` : undefined}
           >
             <InputNumber
               style={{ width: '100%' }}
               min={1}
+              max={type === 'to-store' && toStoreId && productId ? sourceStoreStock : undefined}
               placeholder="请输入调拨数量"
             />
           </Form.Item>

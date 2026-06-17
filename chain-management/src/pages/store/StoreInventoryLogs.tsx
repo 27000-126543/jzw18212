@@ -1,8 +1,12 @@
 import React, { useState, useMemo } from 'react';
-import { Card, Table, Button, Space, Tag, Select, Modal, Timeline, Input } from 'antd';
-import { SearchOutlined, EyeOutlined } from '@ant-design/icons';
+import { Card, Table, Button, Space, Tag, Select, Modal, Timeline, Input, Tabs, DatePicker, Statistic } from 'antd';
+import type { TableProps } from 'antd';
+import { SearchOutlined, EyeOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useApp } from '../../store/AppContext';
 import type { InventoryLog, InventoryLogType } from '../../types';
+import dayjs from 'dayjs';
+
+const { RangePicker } = DatePicker;
 
 const typeColorMap: Record<InventoryLogType, string> = {
   'sale': '#ff4d4f',
@@ -30,10 +34,13 @@ const typeIconMap: Record<InventoryLogType, string> = {
 
 const StoreInventoryLogs: React.FC = () => {
   const { state } = useApp();
+  const [activeTab, setActiveTab] = useState<string>('logs');
   const [typeFilter, setTypeFilter] = useState<string>('');
   const [productFilter, setProductFilter] = useState<string>('');
   const [searchText, setSearchText] = useState('');
   const [viewingProduct, setViewingProduct] = useState<{ productId: string; name: string; image: string; stock: number } | null>(null);
+  const [reconProductFilter, setReconProductFilter] = useState<string>('');
+  const [reconDateRange, setReconDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>([dayjs().subtract(30, 'day'), dayjs()]);
 
   const storeLogs = useMemo(() => {
     return state.inventoryLogs.filter(l => l.storeId === state.currentStoreId);
@@ -62,6 +69,76 @@ const StoreInventoryLogs: React.FC = () => {
 
   const inQty = storeLogs.filter(l => l.type === 'transfer-in' || l.type === 'hq-replenish').reduce((sum, l) => sum + l.quantity, 0);
   const outQty = storeLogs.filter(l => l.type === 'sale' || l.type === 'transfer-out').reduce((sum, l) => sum + l.quantity, 0);
+
+  const reconciliationData = useMemo(() => {
+    if (!reconDateRange || !reconDateRange[0] || !reconDateRange[1]) return [];
+
+    const startDate = reconDateRange[0].startOf('day');
+    const endDate = reconDateRange[1].endOf('day');
+
+    return storeProducts
+      .filter(p => !reconProductFilter || p.productId === reconProductFilter)
+      .map(product => {
+        const productLogs = storeLogs.filter(l => l.productId === product.productId);
+        const sortedLogs = [...productLogs].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+        let opening = 0;
+        let inTotal = 0;
+        let outTotal = 0;
+
+        const logsBeforePeriod = sortedLogs.filter(l => dayjs(l.createdAt).isBefore(startDate));
+        if (logsBeforePeriod.length > 0) {
+          opening = logsBeforePeriod[logsBeforePeriod.length - 1].afterStock;
+        }
+
+        const logsInPeriod = sortedLogs.filter(l => {
+          const logDate = dayjs(l.createdAt);
+          return logDate.isAfter(startDate.subtract(1, 'second')) && logDate.isBefore(endDate.add(1, 'second'));
+        });
+
+        logsInPeriod.forEach(log => {
+          if (log.type === 'transfer-in' || log.type === 'hq-replenish') {
+            inTotal += log.quantity;
+          } else if (log.type === 'sale' || log.type === 'transfer-out') {
+            outTotal += log.quantity;
+          }
+        });
+
+        if (logsInPeriod.length === 0 && logsBeforePeriod.length === 0) {
+          opening = product.stock;
+        }
+
+        const expectedClosing = opening + inTotal - outTotal;
+        const actualClosing = product.stock;
+        const diff = actualClosing - expectedClosing;
+
+        return {
+          key: product.productId,
+          productId: product.productId,
+          productName: product.name,
+          productImage: product.image,
+          opening,
+          inTotal,
+          outTotal,
+          expectedClosing,
+          actualClosing,
+          diff,
+        };
+      });
+  }, [storeLogs, storeProducts, reconDateRange, reconProductFilter]);
+
+  const reconciliationSummary = useMemo(() => {
+    if (reconciliationData.length === 0) return null;
+
+    const totalOpening = reconciliationData.reduce((sum, r) => sum + r.opening, 0);
+    const totalIn = reconciliationData.reduce((sum, r) => sum + r.inTotal, 0);
+    const totalOut = reconciliationData.reduce((sum, r) => sum + r.outTotal, 0);
+    const totalClosing = reconciliationData.reduce((sum, r) => sum + r.actualClosing, 0);
+    const matchedCount = reconciliationData.filter(r => r.diff === 0).length;
+    const diffCount = reconciliationData.filter(r => r.diff !== 0).length;
+
+    return { totalOpening, totalIn, totalOut, totalClosing, matchedCount, diffCount };
+  }, [reconciliationData]);
 
   const columns = [
     {
@@ -146,80 +223,305 @@ const StoreInventoryLogs: React.FC = () => {
     },
   ];
 
+  type ReconciliationRecord = {
+    key: string;
+    productId: string;
+    productName: string;
+    productImage: string;
+    opening: number;
+    inTotal: number;
+    outTotal: number;
+    expectedClosing: number;
+    actualClosing: number;
+    diff: number;
+  };
+
+  const reconciliationColumns: TableProps<ReconciliationRecord>['columns'] = [
+    {
+      title: '商品',
+      key: 'product',
+      width: 200,
+      render: (_: unknown, record: ReconciliationRecord) => (
+        <Space>
+          <span style={{ fontSize: '24px' }}>{record.productImage || '📦'}</span>
+          <span>{record.productName}</span>
+        </Space>
+      ),
+    },
+    {
+      title: '期初库存',
+      dataIndex: 'opening',
+      key: 'opening',
+      width: 100,
+      align: 'center',
+    },
+    {
+      title: '入库数量',
+      dataIndex: 'inTotal',
+      key: 'inTotal',
+      width: 100,
+      align: 'center',
+      render: (v: number) => <span style={{ color: '#52c41a', fontWeight: 500 }}>+{v}</span>,
+    },
+    {
+      title: '出库数量',
+      dataIndex: 'outTotal',
+      key: 'outTotal',
+      width: 100,
+      align: 'center',
+      render: (v: number) => <span style={{ color: '#ff4d4f', fontWeight: 500 }}>-{v}</span>,
+    },
+    {
+      title: '账面期末',
+      dataIndex: 'expectedClosing',
+      key: 'expectedClosing',
+      width: 100,
+      align: 'center',
+      render: (v: number) => <span style={{ fontWeight: 500 }}>{v}</span>,
+    },
+    {
+      title: '实际期末',
+      dataIndex: 'actualClosing',
+      key: 'actualClosing',
+      width: 100,
+      align: 'center',
+      render: (v: number) => <span style={{ fontWeight: 500, color: v < 30 ? '#ff4d4f' : undefined }}>{v}</span>,
+    },
+    {
+      title: '差异',
+      dataIndex: 'diff',
+      key: 'diff',
+      width: 100,
+      align: 'center',
+      render: (v: number) => <span style={{ fontWeight: 500, color: v !== 0 ? '#ff4d4f' : undefined }}>{v > 0 ? `+${v}` : v}</span>,
+    },
+    {
+      title: '状态',
+      key: 'status',
+      width: 120,
+      align: 'center',
+      render: (_: unknown, record: ReconciliationRecord) => {
+        const isMatched = record.diff === 0;
+        return (
+          <Tag icon={isMatched ? <CheckCircleOutlined /> : <CloseCircleOutlined />} color={isMatched ? 'success' : 'error'}>
+            {isMatched ? '对账相符' : '存在差异'}
+          </Tag>
+        );
+      },
+    },
+  ];
+
   return (
     <div>
-      <div style={{ marginBottom: '16px' }}>
-        <Space size={[16, 16]} wrap>
-          <Card style={{ minWidth: 180 }}>
-            <div style={{ fontSize: '12px', color: '#999' }}>入库总量</div>
-            <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#52c41a' }}>
-              +{inQty} 件
-            </div>
-          </Card>
-          <Card style={{ minWidth: 180 }}>
-            <div style={{ fontSize: '12px', color: '#999' }}>出库总量</div>
-            <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#ff4d4f' }}>
-              -{outQty} 件
-            </div>
-          </Card>
-          <Card style={{ minWidth: 180 }}>
-            <div style={{ fontSize: '12px', color: '#999' }}>流水条数</div>
-            <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#1890ff' }}>
-              {storeLogs.length}
-            </div>
-          </Card>
-        </Space>
-      </div>
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={[
+          {
+            key: 'logs',
+            label: '流水明细',
+            children: (
+              <>
+                <div style={{ marginBottom: '16px' }}>
+                  <Space size={[16, 16]} wrap>
+                    <Card style={{ minWidth: 180 }}>
+                      <div style={{ fontSize: '12px', color: '#999' }}>入库总量</div>
+                      <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#52c41a' }}>
+                        +{inQty} 件
+                      </div>
+                    </Card>
+                    <Card style={{ minWidth: 180 }}>
+                      <div style={{ fontSize: '12px', color: '#999' }}>出库总量</div>
+                      <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#ff4d4f' }}>
+                        -{outQty} 件
+                      </div>
+                    </Card>
+                    <Card style={{ minWidth: 180 }}>
+                      <div style={{ fontSize: '12px', color: '#999' }}>流水条数</div>
+                      <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#1890ff' }}>
+                        {storeLogs.length}
+                      </div>
+                    </Card>
+                  </Space>
+                </div>
 
-      <Card style={{ marginBottom: '16px' }} bodyStyle={{ padding: '16px' }}>
-        <Space wrap>
-          <Input
-            placeholder="搜索商品名称、备注"
-            prefix={<SearchOutlined />}
-            value={searchText}
-            onChange={e => setSearchText(e.target.value)}
-            style={{ width: 220 }}
-            allowClear
-          />
-          <Select
-            placeholder="选择商品"
-            value={productFilter || undefined}
-            onChange={setProductFilter}
-            style={{ width: 200 }}
-            allowClear
-            showSearch
-            optionFilterProp="children"
-          >
-            {storeProducts.map(p => (
-              <Select.Option key={p.productId} value={p.productId}>
-                {p.image} {p.name}
-              </Select.Option>
-            ))}
-          </Select>
-          <Select
-            placeholder="变动类型"
-            value={typeFilter || undefined}
-            onChange={setTypeFilter}
-            style={{ width: 140 }}
-            allowClear
-          >
-            <Select.Option value="sale">🛒 销售出库</Select.Option>
-            <Select.Option value="transfer-in">📥 调拨入库</Select.Option>
-            <Select.Option value="transfer-out">📤 调拨出库</Select.Option>
-            <Select.Option value="hq-replenish">📦 总部补货</Select.Option>
-            <Select.Option value="adjust">🔧 库存调整</Select.Option>
-          </Select>
-        </Space>
-      </Card>
+                <Card style={{ marginBottom: '16px' }} bodyStyle={{ padding: '16px' }}>
+                  <Space wrap>
+                    <Input
+                      placeholder="搜索商品名称、备注"
+                      prefix={<SearchOutlined />}
+                      value={searchText}
+                      onChange={e => setSearchText(e.target.value)}
+                      style={{ width: 220 }}
+                      allowClear
+                    />
+                    <Select
+                      placeholder="选择商品"
+                      value={productFilter || undefined}
+                      onChange={setProductFilter}
+                      style={{ width: 200 }}
+                      allowClear
+                      showSearch
+                      optionFilterProp="children"
+                    >
+                      {storeProducts.map(p => (
+                        <Select.Option key={p.productId} value={p.productId}>
+                          {p.image} {p.name}
+                        </Select.Option>
+                      ))}
+                    </Select>
+                    <Select
+                      placeholder="变动类型"
+                      value={typeFilter || undefined}
+                      onChange={setTypeFilter}
+                      style={{ width: 140 }}
+                      allowClear
+                    >
+                      <Select.Option value="sale">🛒 销售出库</Select.Option>
+                      <Select.Option value="transfer-in">📥 调拨入库</Select.Option>
+                      <Select.Option value="transfer-out">📤 调拨出库</Select.Option>
+                      <Select.Option value="hq-replenish">📦 总部补货</Select.Option>
+                      <Select.Option value="adjust">🔧 库存调整</Select.Option>
+                    </Select>
+                  </Space>
+                </Card>
 
-      <Card>
-        <Table
-          dataSource={filteredLogs}
-          columns={columns}
-          rowKey="id"
-          pagination={{ pageSize: 10, showSizeChanger: true }}
-        />
-      </Card>
+                <Card>
+                  <Table
+                    dataSource={filteredLogs}
+                    columns={columns}
+                    rowKey="id"
+                    pagination={{ pageSize: 10, showSizeChanger: true }}
+                  />
+                </Card>
+              </>
+            ),
+          },
+          {
+            key: 'reconciliation',
+            label: '库存对账',
+            children: (
+              <>
+                <Card style={{ marginBottom: '16px' }} bodyStyle={{ padding: '16px' }}>
+                  <Space wrap>
+                    <Select
+                      placeholder="选择商品（可选）"
+                      value={reconProductFilter || undefined}
+                      onChange={setReconProductFilter}
+                      style={{ width: 240 }}
+                      allowClear
+                      showSearch
+                      optionFilterProp="children"
+                    >
+                      {storeProducts.map(p => (
+                        <Select.Option key={p.productId} value={p.productId}>
+                          {p.image} {p.name}
+                        </Select.Option>
+                      ))}
+                    </Select>
+                    <RangePicker
+                      value={reconDateRange}
+                      onChange={(dates) => setReconDateRange(dates as [dayjs.Dayjs, dayjs.Dayjs] | null)}
+                      style={{ width: 280 }}
+                    />
+                  </Space>
+                </Card>
+
+                {reconciliationSummary && (
+                  <div style={{ marginBottom: '16px' }}>
+                    <Space size={[16, 16]} wrap>
+                      <Card style={{ minWidth: 200 }}>
+                        <Statistic
+                          title="期初库存总量"
+                          value={reconciliationSummary.totalOpening}
+                          suffix="件"
+                          valueStyle={{ color: '#1890ff' }}
+                        />
+                      </Card>
+                      <Card style={{ minWidth: 200 }}>
+                        <Statistic
+                          title="本期入库总量"
+                          value={reconciliationSummary.totalIn}
+                          prefix="+"
+                          suffix="件"
+                          valueStyle={{ color: '#52c41a' }}
+                        />
+                      </Card>
+                      <Card style={{ minWidth: 200 }}>
+                        <Statistic
+                          title="本期出库总量"
+                          value={reconciliationSummary.totalOut}
+                          prefix="-"
+                          suffix="件"
+                          valueStyle={{ color: '#ff4d4f' }}
+                        />
+                      </Card>
+                      <Card style={{ minWidth: 200 }}>
+                        <Statistic
+                          title="期末库存总量"
+                          value={reconciliationSummary.totalClosing}
+                          suffix="件"
+                          valueStyle={{ color: '#722ed1' }}
+                        />
+                      </Card>
+                    </Space>
+                  </div>
+                )}
+
+                {reconciliationSummary && (
+                  <Card style={{ marginBottom: '16px' }}>
+                    <Space size={[24, 24]}>
+                      <Space>
+                        <span style={{ color: '#666' }}>对账结果：</span>
+                        <Tag icon={<CheckCircleOutlined />} color="success" style={{ padding: '4px 12px', fontSize: '14px' }}>
+                          对账相符：{reconciliationSummary.matchedCount} 个商品
+                        </Tag>
+                        <Tag icon={<CloseCircleOutlined />} color="error" style={{ padding: '4px 12px', fontSize: '14px' }}>
+                          存在差异：{reconciliationSummary.diffCount} 个商品
+                        </Tag>
+                      </Space>
+                      <Button
+                        type="primary"
+                        onClick={() => {
+                          const csvContent = [
+                            ['商品', '期初库存', '入库数量', '出库数量', '账面期末', '实际期末', '差异', '状态'].join(','),
+                            ...reconciliationData.map(r => [
+                              r.productName,
+                              r.opening,
+                              r.inTotal,
+                              r.outTotal,
+                              r.expectedClosing,
+                              r.actualClosing,
+                              r.diff,
+                              r.diff === 0 ? '对账相符' : '存在差异'
+                            ].join(','))
+                          ].join('\n');
+                          const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+                          const link = document.createElement('a');
+                          link.href = URL.createObjectURL(blob);
+                          link.download = `库存对账_${dayjs().format('YYYYMMDD')}.csv`;
+                          link.click();
+                        }}
+                      >
+                        导出对账单
+                      </Button>
+                    </Space>
+                  </Card>
+                )}
+
+                <Card>
+                  <Table
+                    dataSource={reconciliationData}
+                    columns={reconciliationColumns}
+                    rowKey="key"
+                    pagination={{ pageSize: 10, showSizeChanger: true }}
+                  />
+                </Card>
+              </>
+            ),
+          },
+        ]}
+      />
 
       <Modal
         title={viewingProduct ? `${viewingProduct.image} ${viewingProduct.name} · 库存流水` : ''}
